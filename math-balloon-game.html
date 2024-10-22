@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>משחק בלונים מתמטי</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-image: url('background.png');
+            background-size: cover;
+            text-align: center;
+        }
+
+        #game-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+        }
+
+        .balloon {
+            width: 80px;
+            height: 120px;
+            border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 10px;
+            cursor: pointer;
+            font-size: 24px;
+            font-weight: bold;
+            color: black;
+            position: relative;
+            transition: transform 0.3s, background-color 0.3s;
+        }
+
+        .balloon:after {
+            content: '';
+            position: absolute;
+            bottom: -20px;
+            left: 50%;
+            width: 2px;
+            height: 20px;
+            background: #666;
+            transform: translateX(-50%);
+        }
+
+        .balloon:hover {
+            transform: scale(1.1);
+        }
+
+        .balloon.selected {
+            transform: scale(1.1);
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        }
+
+        .balloon.wrong {
+            animation: shake 0.5s;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        #feedback-message {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 18px;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+
+        #feedback-message.error {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 2px solid #ef5350;
+        }
+
+        #feedback-message.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 2px solid #66bb6a;
+        }
+
+        #feedback-message.show {
+            opacity: 1;
+        }
+
+        #start-button, #next-level-button {
+            font-size: 24px;
+            padding: 10px 30px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 20px;
+        }
+
+        #next-level-button:hover {
+            background-color: #45a049;
+        }
+
+        #timer, #score {
+            font-size: 20px;
+            margin: 10px;
+        }
+
+        #player-name-container {
+            margin: 20px;
+        }
+
+        #player-name-input {
+            font-size: 18px;
+            padding: 5px;
+            margin: 10px;
+        }
+
+        #victory-container {
+            display: none;
+            text-align: center;
+        }
+
+        #victory-container img {
+            width: 200px;
+            margin: 20px;
+        }
+
+        #level-instruction {
+            font-size: 24px;
+            color: #2196F3;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+
+        .level-indicator {
+            font-size: 18px;
+            color: #666;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="feedback-message"></div>
+    <div id="game-container">
+        <div id="player-name-container">
+            <label for="player-name-input">הכנס את שמך:</label>
+            <input type="text" id="player-name-input">
+            <button id="start-button">התחל משחק</button>
+        </div>
+        
+        <div id="game-content" style="display: none;">
+            <div id="timer">זמן: 00:00</div>
+            <div id="score">נקודות: 0</div>
+            <div class="level-indicator">שלב <span id="current-level">1</span> מתוך 3</div>
+            <div id="level-instruction"></div>
+            <div id="balloons-container"></div>
+            <button id="next-level-button" style="display: none;">עבור לשלב הבא</button>
+        </div>
+
+        <div id="victory-container">
+            <img src="victory.png" alt="גביע">
+            <h2>כל הכבוד!</h2>
+            <div id="final-score"></div>
+            <div id="completion-time"></div>
+        </div>
+    </div>
+
+    <audio id="success-sound" src="sound.mp3"></audio>
+
+    <script>
+        const colors = ['#FFD700', '#40E0D0', '#FF69B4', '#32CD32', '#FF1493', '#00BFFF', 
+                       '#FF4500', '#9932CC', '#00FF7F', '#FF69B4', '#4169E1', '#FF8C00'];
+        
+        let currentLevel = 0;
+        let score = 0;
+        let selectedBalloons = [];
+        let startTime;
+        let timerInterval;
+        let levelConfigs = [
+            { pairs: 3, sum: 10, numbers: [] },
+            { pairs: 5, sum: 30, numbers: [] },
+            { pairs: 6, sum: 100, numbers: [] }
+        ];
+
+        const audio = document.getElementById('success-sound');
+        const startButton = document.getElementById('start-button');
+        const nextLevelButton = document.getElementById('next-level-button');
+        const gameContent = document.getElementById('game-content');
+        const playerNameContainer = document.getElementById('player-name-container');
+        const victoryContainer = document.getElementById('victory-container');
+        const feedbackMessage = document.getElementById('feedback-message');
+
+        function showFeedback(message, isError) {
+            feedbackMessage.textContent = message;
+            feedbackMessage.className = isError ? 'error show' : 'success show';
+            setTimeout(() => {
+                feedbackMessage.className = isError ? 'error' : 'success';
+            }, 2000);
+        }
+
+        function generateNumbers(count, sum) {
+            let numbers = [];
+            while (numbers.length < count) {
+                const num = Math.floor(Math.random() * (sum - 1)) + 1;
+                const complement = sum - num;
+                if (num < complement && !numbers.includes(num) && !numbers.includes(complement)) {
+                    numbers.push(num, complement);
+                }
+            }
+            return shuffleArray(numbers);
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function updateTimer() {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('timer').textContent = 
+                `זמן: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        function createBalloon(number, index) {
+            const balloon = document.createElement('div');
+            balloon.className = 'balloon';
+            balloon.style.backgroundColor = colors[index % colors.length];
+            balloon.textContent = number;
+            balloon.addEventListener('click', () => handleBalloonClick(balloon, number));
+            return balloon;
+        }
+
+        function handleBalloonClick(balloon, number) {
+            if (balloon.style.visibility === 'hidden') return;
+
+            if (selectedBalloons.length === 0) {
+                selectedBalloons = [{ balloon, number }];
+                balloon.classList.add('selected');
+            } else {
+                const firstBalloon = selectedBalloons[0];
+                const sum = firstBalloon.number + number;
+                const targetSum = levelConfigs[currentLevel].sum;
+
+                if (sum === targetSum) {
+                    audio.play();
+                    firstBalloon.balloon.style.visibility = 'hidden';
+                    balloon.style.visibility = 'hidden';
+                    score++;
+                    document.getElementById('score').textContent = `נקודות: ${score}`;
+                    showFeedback(`נכון! ${firstBalloon.number} + ${number} = ${sum}`, false);
+
+                    const visibleBalloons = document.querySelectorAll('.balloon:not([style*="visibility: hidden"])');
+                    if (visibleBalloons.length === 0) {
+                        if (currentLevel < levelConfigs.length - 1) {
+                            nextLevelButton.style.display = 'block';
+                        } else {
+                            endGame();
+                        }
+                    }
+                } else {
+                    // Wrong answer feedback
+                    firstBalloon.balloon.classList.add('wrong');
+                    balloon.classList.add('wrong');
+                    showFeedback(`${firstBalloon.number} + ${number} = ${sum}. נסה שוב!`, true);
+                    
+                    setTimeout(() => {
+                        firstBalloon.balloon.classList.remove('wrong');
+                        balloon.classList.remove('wrong');
+                    }, 500);
+                }
+
+                firstBalloon.balloon.classList.remove('selected');
+                selectedBalloons = [];
+            }
+        }
+
+        function startLevel() {
+            // Generate new numbers for the current level
+            levelConfigs[currentLevel].numbers = generateNumbers(
+                levelConfigs[currentLevel].pairs * 2,
+                levelConfigs[currentLevel].sum
+            );
+
+            const config = levelConfigs[currentLevel];
+            document.getElementById('balloons-container').innerHTML = '';
+            document.getElementById('level-instruction').textContent = 
+                `מצא את זוגות הבלונים שסכומם ${config.sum}`;
+            document.getElementById('current-level').textContent = currentLevel + 1;
+
+            config.numbers.forEach((number, index) => {
+                document.getElementById('balloons-container').appendChild(createBalloon(number, index));
+            });
+
+            nextLevelButton.style.display = 'none';
+        }
+
+        function endGame() {
+            gameContent.style.display = 'none';
+            victoryContainer.style.display = 'block';
+            const finalTime = updateTimer();
+            document.getElementById('final-score').textContent = `צברת ${score} נקודות!`;
+            document.getElementById('completion-time').textContent = `זמן סיום: ${finalTime}`;
+            clearInterval(timerInterval);
+        }
+
+        startButton.addEventListener('click', () => {
+            const playerName = document.getElementById('player-name-input').value;
+            if (!playerName) {
+                alert('אנא הכנס את שמך');
+                return;
+            }
+
+            playerNameContainer.style.display = 'none';
+            gameContent.style.display = 'block';
+            startTime = Date.now();
+            timerInterval = setInterval(updateTimer, 1000);
+            startLevel();
+        });
+
+        nextLevelButton.addEventListener('click', () => {
+            currentLevel++;
+            startLevel();
+        });
+    </script>
+</body>
+</html>
